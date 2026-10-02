@@ -33,11 +33,11 @@ local function load_config()
         max_distance = 800,
         show_distance = true
     }
-    Core.config.silent = Core.config.silent or {
+     Core.config.silent = Core.config.silent or {
         enabled = false,
         hit_part = "Head",
         fov = 200,
-        keybind = Enum.KeyCode.RightAlt,
+        keybind = Enum.KeyCode.End,
         team_check = true
     }
     Core.config.hitbox = Core.config.hitbox or {
