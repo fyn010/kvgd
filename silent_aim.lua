@@ -1,4 +1,5 @@
 -- language: Lua, file: silent_aim.lua
+-- hook em ShootGun, KnifeStab, KnifeThrow. End toggle.
 
 getgenv().KVGD_silent_aim = function(Core)
     local Players = game:GetService("Players")
@@ -109,7 +110,7 @@ getgenv().KVGD_silent_aim = function(Core)
 
     UIS.InputBegan:Connect(function(input, gpe)
         if gpe then return end
-        if input.KeyCode == cfg.keybind then
+        if input.KeyCode == Enum.KeyCode.End then
             cfg.enabled = not cfg.enabled
             Core.save()
             print("[AIM] " .. tostring(cfg.enabled))
@@ -119,7 +120,7 @@ getgenv().KVGD_silent_aim = function(Core)
     getgenv().AimFOV = function(v) cfg.fov = v; Core.save() end
     getgenv().AimPart = function(v) cfg.hit_part = v; Core.save() end
 
-    print("[AIM] carregado — RightAlt toggle")
+    print("[AIM] carregado — End toggle")
 end
 
 print("[AIM] módulo definido")
