@@ -1,5 +1,4 @@
 -- language: Lua, file: lootbox.lua
--- FASE 1: só monitora os remotes de caixa.
 
 getgenv().KVGD_lootbox = function(Core)
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,34 +13,64 @@ getgenv().KVGD_lootbox = function(Core)
         else return tostring(v) end
     end
 
-    Core.register_hook("ReplicatedStorage.Remotes.Shop.PurchaseBox", "FireServer", function(args)
-        print("[LOOTBOX] OUT PurchaseBox:")
-        for i, v in ipairs(args) do
-            print("  [" .. i .. "] " .. typeof(v) .. " = " .. describe(v))
+    task.spawn(function()
+        local box
+        local tries = 0
+        while not box and tries < 60 do
+            box = ReplicatedStorage:FindFirstChild("PurchaseBox", true)
+            if not box then task.wait(0.5); tries = tries + 1 end
         end
-        return nil
+        if not box then
+            warn("[LOOTBOX] PurchaseBox não apareceu em 30s")
+            return
+        end
+        print("[LOOTBOX] PurchaseBox achado em: " .. box:GetFullName())
+
+        local mt = getrawmetatable(box)
+        if not mt then return end
+        setreadonly(mt, false)
+        local old_index = mt.__index
+        mt.__index = function(t, k)
+            if k == "FireServer" or k == "InvokeServer" then
+                return function(self, ...)
+                    local args = {...}
+                    print("[LOOTBOX] OUT " .. k .. ":")
+                    for i, v in ipairs(args) do
+                        print("  [" .. i .. "] " .. typeof(v) .. " = " .. describe(v))
+                    end
+                    return old_index(self, k)(self, ...)
+                end
+            end
+            return old_index(t, k)
+        end
+        setreadonly(mt, true)
     end)
 
     local function watch_incoming(name)
-        local remote = ReplicatedStorage:FindFirstChild(name, true)
-        if remote and remote:IsA("RemoteEvent") then
-            remote.OnClientEvent:Connect(function(...)
-                local args = {...}
-                print("[LOOTBOX] IN " .. name .. ":")
-                for i, v in ipairs(args) do
-                    print("  [" .. i .. "] " .. typeof(v) .. " = " .. describe(v))
-                end
-            end)
-            print("[LOOTBOX] monitorando " .. name)
-        else
-            warn("[LOOTBOX] não achou: " .. name)
-        end
+        task.spawn(function()
+            local remote
+            local tries = 0
+            while not remote and tries < 60 do
+                remote = ReplicatedStorage:FindFirstChild(name, true)
+                if not remote then task.wait(0.5); tries = tries + 1 end
+            end
+            if remote and remote:IsA("RemoteEvent") then
+                remote.OnClientEvent:Connect(function(...)
+                    local args = {...}
+                    print("[LOOTBOX] IN " .. name .. ":")
+                    for i, v in ipairs(args) do
+                        print("  [" .. i .. "] " .. typeof(v) .. " = " .. describe(v))
+                    end
+                end)
+                print("[LOOTBOX] monitorando " .. name)
+            end
+        end)
     end
 
     watch_incoming("BoxOpeningClient")
     watch_incoming("BoxOpenedMessageClient")
 
-    print("[LOOTBOX] monitor ativo — abra uma caixa e veja o output")
+    print("[LOOTBOX] monitor ativo — abra uma caixa")
 end
 
 print("[LOOTBOX] módulo definido")
