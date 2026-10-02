@@ -1,5 +1,5 @@
 -- language: Lua, file: esp.lua
--- ESP com tracer, distância, team check. RightShift toggle.
+-- ESP com tracer, distância, team check. Delete toggle.
 
 getgenv().KVGD_esp = function(Core)
     local Players = game:GetService("Players")
@@ -50,7 +50,7 @@ getgenv().KVGD_esp = function(Core)
 
     UIS.InputBegan:Connect(function(input, gpe)
         if gpe then return end
-        if input.KeyCode == Enum.KeyCode.RightShift then
+        if input.KeyCode == Enum.KeyCode.Delete then
             cfg.enabled = not cfg.enabled
             Core.save()
             print("[ESP] " .. tostring(cfg.enabled))
@@ -110,7 +110,7 @@ getgenv().KVGD_esp = function(Core)
         end
     end
 
-    print("[ESP] carregado — RightShift toggle")
+    print("[ESP] carregado — Delete toggle")
 end
 
 print("[ESP] módulo definido")
