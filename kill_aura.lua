@@ -1,178 +1,159 @@
 -- language: Lua, file: kill_aura.lua
--- Knife VS Gun DUELS focused. Prioriza CurrentDuel, senão proximidade.
--- Remotes comuns: ShootGun, KnifeStab, KnifeThrow, ReplicateShot, GiveRodaShot
+-- ataca o oponente do duelo se estiver em duelo.
+-- senão, ataca o inimigo mais próximo. K toggle.
 
 getgenv().KVGD_kill_aura = function(Core)
-	local Players = game:GetService("Players")
-	local ReplicatedStorage = game:GetService("ReplicatedStorage")
-	local UserInputService = game:GetService("UserInputService")
-	local LP = Players.LocalPlayer
-	local cfg = Core.config.aura
+    local Players = game:GetService("Players")
+    local RS = game:GetService("ReplicatedStorage")
+    local UIS = game:GetService("UserInputService")
+    local CAS = game:GetService("ContextActionService")
+    local LP = Players.LocalPlayer
 
-	local lastAttack = 0
-	local CANDIDATES = {
-		"ShootGun", "KnifeStab", "KnifeThrow", "ReplicateShot", "GiveRodaShot",
-		"Shoot", "Fire", "ThrowKnife", "Stab", "Attack", "Hit"
-	}
-	local remotes = {}
+    local state = {
+        enabled = true,
+        verbose = true,
+        cooldown = 0.5,
+        require_tool = true,
+        fallback_range = 200,   -- se não tiver duelo, ataca quem estiver mais perto que isso
+    }
 
-	local function collect_remotes()
-		remotes = {}
-		for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-			if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-				local n = obj.Name
-				for _, cand in ipairs(CANDIDATES) do
-					if n == cand or string.find(string.lower(n), string.lower(cand)) then
-						table.insert(remotes, obj)
-						break
-					end
-				end
-			end
-		end
-		-- também procura em folders comuns de duelo
-		local duelFolder = ReplicatedStorage:FindFirstChild("Duels") or ReplicatedStorage:FindFirstChild("Combat") or ReplicatedStorage:FindFirstChild("Remotes")
-		if duelFolder then
-			for _, obj in ipairs(duelFolder:GetDescendants()) do
-				if (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")) and not table.find(remotes, obj) then
-					local n = string.lower(obj.Name)
-					if string.find(n, "shoot") or string.find(n, "knife") or string.find(n, "stab") or string.find(n, "throw") or string.find(n, "hit") or string.find(n, "attack") then
-						table.insert(remotes, obj)
-					end
-				end
-			end
-		end
-		if cfg.verbose then
-			print("[AURA] " .. #remotes .. " remotes")
-		end
-	end
+    local last_attack = 0
+    local CANDIDATES = { "ShootGun", "KnifeStab", "KnifeThrow", "ReplicateShot", "GiveRodaShot" }
+    local remotes = {}
 
-	local function get_by_duel()
-		local myDuel = LP:GetAttribute("CurrentDuel")
-		if not myDuel then return nil end
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= LP and p:GetAttribute("CurrentDuel") == myDuel then
-				local char, hum, hrp = Core.get_character(p)
-				if char then
-					return { player = p, hrp = hrp, hum = hum }
-				end
-			end
-		end
-		return nil
-	end
+    local function collect_remotes()
+        remotes = {}
+        for _, obj in ipairs(RS:GetDescendants()) do
+            if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+                for _, name in ipairs(CANDIDATES) do
+                    if obj.Name == name then
+                        table.insert(remotes, obj)
+                        break
+                    end
+                end
+            end
+        end
+        print("[AURA] " .. #remotes .. " remotes coletados")
+    end
 
-	local function get_by_proximity()
-		local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-		if not me then return nil end
-		local best, bestD = nil, cfg.fallback_range or 200
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= LP and not Core.is_teammate(p) then
-				local char, hum, hrp = Core.get_character(p)
-				if char then
-					local d = (hrp.Position - me.Position).Magnitude
-					if d < bestD then
-						best, bestD = { player = p, hrp = hrp, hum = hum }, d
-					end
-				end
-			end
-		end
-		return best
-	end
+    -- tenta pelo CurrentDuel
+    local function get_by_duel()
+        local my_duel = LP:GetAttribute("CurrentDuel")
+        if not my_duel then return nil end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP and p:GetAttribute("CurrentDuel") == my_duel then
+                local char = p.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hum and hrp and hum.Health > 0 then
+                    return { player = p, char = char, hrp = hrp, hum = hum }
+                end
+            end
+        end
+        return nil
+    end
 
-	local function get_target()
-		local t = get_by_duel()
-		if t then return t, "duelo" end
-		t = get_by_proximity()
-		if t then return t, "proximidade" end
-		return nil, nil
-	end
+    -- fallback: inimigo vivo mais próximo
+    local function get_by_proximity()
+        local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if not me then return nil end
 
-	local function has_tool()
-		local char = LP.Character
-		if not char then return false end
-		for _, child in ipairs(char:GetChildren()) do
-			if child:IsA("Tool") then return true end
-		end
-		return false
-	end
+        local best, best_d = nil, state.fallback_range
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP then
+                local char = p.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hum and hrp and hum.Health > 0 then
+                    local d = (hrp.Position - me.Position).Magnitude
+                    if d < best_d then
+                        best, best_d = { player = p, char = char, hrp = hrp, hum = hum }, d
+                    end
+                end
+            end
+        end
+        return best
+    end
 
-	local function fire(remote, args)
-		pcall(function()
-			if remote:IsA("RemoteEvent") then
-				remote:FireServer(table.unpack(args))
-			else
-				remote:InvokeServer(table.unpack(args))
-			end
-		end)
-	end
+    local function get_target()
+        local t = get_by_duel()
+        if t then return t, "duelo" end
+        t = get_by_proximity()
+        if t then return t, "proximidade" end
+        return nil, nil
+    end
 
-	local function attack()
-		if not cfg.enabled then return end
-		if cfg.require_tool and not has_tool() then return end
+    local function has_tool_equipped()
+        local char = LP.Character
+        if not char then return false end
+        for _, tool in ipairs(char:GetChildren()) do
+            if tool:IsA("Tool") then return true end
+        end
+        return false
+    end
 
-		local now = tick()
-		if now - lastAttack < (cfg.cooldown or 0.35) then return end
-		lastAttack = now
+    local function fire(remote, args)
+        pcall(function()
+            if remote:IsA("RemoteEvent") then
+                remote:FireServer(table.unpack(args))
+            else
+                remote:InvokeServer(table.unpack(args))
+            end
+        end)
+    end
 
-		local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-		if not me then return end
+    local function attack()
+        if not state.enabled then return end
+        if state.require_tool and not has_tool_equipped() then return end
 
-		local target, mode = get_target()
-		if not target then
-			if cfg.verbose then print("[AURA] nenhum alvo") end
-			return
-		end
+        local now = tick()
+        if now - last_attack < state.cooldown then return end
+        last_attack = now
 
-		local origin = me.Position
-		local dir = (target.hrp.Position - origin).Unit
-		local head = target.player.Character and target.player.Character:FindFirstChild("Head")
-		local aimPos = head and head.Position or target.hrp.Position
+        local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if not me then return end
 
-		for _, remote in ipairs(remotes) do
-			-- formatos comuns em Knife VS Gun DUELS / duelo pads
-			fire(remote, { dir })
-			fire(remote, { origin, dir })
-			fire(remote, { aimPos })
-			fire(remote, { origin, aimPos })
-			fire(remote, { target.player })
-		end
+        local target, mode = get_target()
+        if not target then
+            if state.verbose then print("[AURA] nenhum alvo") end
+            return
+        end
 
-		if cfg.verbose then
-			print("[AURA] " .. target.player.Name .. " (" .. mode .. ")")
-		end
-	end
+        local vec_unit = (target.hrp.Position - me.Position).Unit
+        for _, remote in ipairs(remotes) do
+            fire(remote, { vec_unit })
+        end
 
-	UserInputService.InputBegan:Connect(function(input, gpe)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.KeyCode == Enum.KeyCode.ButtonR2
-			or input.KeyCode == Enum.KeyCode.E then -- E = throw knife no jogo
-			attack()
-		end
-	end)
+        if state.verbose then
+            print("[AURA] atacou " .. target.player.Name .. " (" .. mode .. ")")
+        end
+    end
 
-	UserInputService.TouchStarted:Connect(function()
-		attack()
-	end)
+    CAS:BindAction("KVGD_AuraClick", function(_, s)
+        if s == Enum.UserInputState.Begin then attack() end
+        return Enum.ContextActionResult.Pass
+    end, false, Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR2)
 
-	Core.bind_toggle(cfg.keybind or "K", function() return cfg.enabled end, function(v) cfg.enabled = v end, "AURA")
+    UIS.InputBegan:Connect(function(input, gpe)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            attack()
+        end
+        if input.KeyCode == Enum.KeyCode.K and not gpe then
+            state.enabled = not state.enabled
+            print("[AURA] " .. tostring(state.enabled))
+        end
+    end)
 
-	ReplicatedStorage.DescendantAdded:Connect(function(obj)
-		if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-			local n = string.lower(obj.Name)
-			if string.find(n, "shoot") or string.find(n, "knife") or string.find(n, "stab") or string.find(n, "throw") or string.find(n, "hit") or string.find(n, "attack") or string.find(n, "fire") then
-				table.insert(remotes, obj)
-			end
-		end
-	end)
+    UIS.TouchStarted:Connect(function() attack() end)
 
-	getgenv().AuraToggle = function(v) cfg.enabled = v and true or false; Core.save(); print("[AURA] " .. tostring(cfg.enabled)) end
-	getgenv().AuraCooldown = function(v) cfg.cooldown = tonumber(v) or cfg.cooldown; Core.save() end
-	getgenv().AuraVerbose = function(v) cfg.verbose = v and true or false end
-	getgenv().AuraRequireTool = function(v) cfg.require_tool = v and true or false end
-	getgenv().AuraRange = function(v) cfg.fallback_range = tonumber(v) or cfg.fallback_range; Core.save(); print("[AURA] range = " .. cfg.fallback_range) end
-	getgenv().AuraRefresh = function() collect_remotes(); print("[AURA] refreshed " .. #remotes) end
+    getgenv().AuraToggle = function(v) state.enabled = v; print("[AURA] " .. tostring(v)) end
+    getgenv().AuraCooldown = function(v) state.cooldown = v; print("[AURA] cooldown = " .. v) end
+    getgenv().AuraVerbose = function(v) state.verbose = v end
+    getgenv().AuraRequireTool = function(v) state.require_tool = v end
+    getgenv().AuraRange = function(v) state.fallback_range = v; print("[AURA] range = " .. v) end
 
-	collect_remotes()
-	print("[AURA] carregado (Knife VS Gun DUELS) — click/E ataca | " .. (cfg.keybind or "K") .. " toggle")
+    collect_remotes()
+    print("[AURA] carregado — clica | K toggle | AuraRange(n)")
 end
 
 print("[AURA] módulo definido")

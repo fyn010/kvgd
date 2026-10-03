@@ -1,227 +1,136 @@
 -- language: Lua, file: silent_aim.lua
--- Knife VS Gun DUELS: silent aim teleguiado (redirect do tiro).
--- Não depende de FOV nem de onde a câmera aponta. Toggle: End
+-- silent aim via snap de câmera E corpo no instante do disparo.
+-- funciona com ou sem shift lock. End toggle.
 
 getgenv().KVGD_silent_aim = function(Core)
-	local Players = game:GetService("Players")
-	local RunService = game:GetService("RunService")
-	local UserInputService = game:GetService("UserInputService")
-	local ReplicatedStorage = game:GetService("ReplicatedStorage")
-	local Camera = workspace.CurrentCamera
-	local LP = Players.LocalPlayer
-	local cfg = Core.config.silent
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local UIS = game:GetService("UserInputService")
+    local CAS = game:GetService("ContextActionService")
+    local Camera = workspace.CurrentCamera
+    local LP = Players.LocalPlayer
+    local cfg = Core.config.silent
 
-	cfg.fov = cfg.fov or 9999 -- irrelevante pro teleguiado, só pro círculo opcional
-	cfg.show_fov = cfg.show_fov == true -- default false
+    local fov_circle = Drawing.new("Circle")
+    fov_circle.Thickness = 1
+    fov_circle.NumSides = 64
+    fov_circle.Transparency = 0.5
+    fov_circle.Filled = false
 
-	local fovCircle = Drawing.new("Circle")
-	fovCircle.Thickness = 1
-	fovCircle.NumSides = 64
-	fovCircle.Transparency = 0.4
-	fovCircle.Filled = false
-	fovCircle.Visible = false
+    local saved_cam = nil
+    local saved_hrp = nil
+    local snap_active = false
 
-	local function get_duel_opponent()
-		local myDuel = LP:GetAttribute("CurrentDuel")
-		if not myDuel then return nil end
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= LP and p:GetAttribute("CurrentDuel") == myDuel then
-				local char = p.Character
-				if char then
-					local part = char:FindFirstChild(cfg.hit_part or "Head") or char:FindFirstChild("Head")
-					local hum = char:FindFirstChildOfClass("Humanoid")
-					if part and hum and hum.Health > 0 then
-						return part, p
-					end
-				end
-			end
-		end
-		return nil
-	end
+    local function is_teammate(player)
+        if not cfg.team_check or player == LP then return true end
+        local my_team = LP.Team
+        local their_team = player.Team
+        return my_team and their_team and my_team == their_team
+    end
 
-	local function get_closest_enemy()
-		local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-		if not me then return nil end
-		local best, bestD, bestP = nil, math.huge, nil
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= LP and not (cfg.team_check and Core.is_teammate(p)) then
-				local char = p.Character
-				if char then
-					local part = char:FindFirstChild(cfg.hit_part or "Head") or char:FindFirstChild("Head")
-					local hum = char:FindFirstChildOfClass("Humanoid")
-					local hrp = char:FindFirstChild("HumanoidRootPart")
-					if part and hum and hum.Health > 0 and hrp then
-						local d = (hrp.Position - me.Position).Magnitude
-						if d < bestD then
-							best, bestD, bestP = part, d, p
-						end
-					end
-				end
-			end
-		end
-		return best, bestP
-	end
+    local function get_target()
+        local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        local best, best_d = nil, cfg.fov
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP and not is_teammate(p) then
+                local char = p.Character
+                local part = char and (char:FindFirstChild(cfg.hit_part) or char:FindFirstChild("Head"))
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if part and hum and hum.Health > 0 then
+                    local sp, on = Camera:WorldToViewportPoint(part.Position)
+                    if on then
+                        local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+                        if d < best_d then best, best_d = part, d end
+                    end
+                end
+            end
+        end
+        return best
+    end
 
-	local function get_target()
-		local part, player = get_duel_opponent()
-		if part then return part, player end
-		return get_closest_enemy()
-	end
+    -- gira câmera E corpo pro alvo. guarda os CFrames originais.
+    local function snap_to(target)
+        saved_cam = Camera.CFrame
 
-	-- redirect de args de tiro pro alvo
-	local function redirect_args(args)
-		local part = get_target()
-		if not part then return args end
+        local char = LP.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
 
-		local origin
-		local char = LP.Character
-		if char then
-			local hrp = char:FindFirstChild("HumanoidRootPart")
-			local head = char:FindFirstChild("Head")
-			origin = (head and head.Position) or (hrp and hrp.Position)
-		end
-		if not origin then
-			origin = Camera.CFrame.Position
-		end
+        if hrp then
+            saved_hrp = hrp.CFrame
+            -- gira o corpo pro alvo (mesma direção da câmera)
+            local look = CFrame.new(hrp.Position, Vector3.new(target.Position.X, hrp.Position.Y, target.Position.Z))
+            hrp.CFrame = look
+        end
 
-		local aim = part.Position
-		local dir = (aim - origin).Unit
+        if hum then
+            hum.AutoRotate = false
+        end
 
-		-- reescreve qualquer Vector3 que pareça direção/origem/ponto
-		local newArgs = {}
-		for i, v in ipairs(args) do
-			if typeof(v) == "Vector3" then
-				-- se parece direção (magnitude ~1) → troca pela dir pro alvo
-				if math.abs(v.Magnitude - 1) < 0.15 then
-					newArgs[i] = dir
-				-- se parece origem (perto do player) → mantém ou força origin
-				elseif origin and (v - origin).Magnitude < 15 then
-					newArgs[i] = origin
-				else
-					-- ponto de impacto / alvo → força no hit part
-					newArgs[i] = aim
-				end
-			else
-				newArgs[i] = v
-			end
-		end
+        -- câmera por cima do corpo
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
 
-		-- se não tinha nenhum Vector3, injeta dir
-		local hadVec = false
-		for _, v in ipairs(newArgs) do
-			if typeof(v) == "Vector3" then hadVec = true break end
-		end
-		if not hadVec then
-			table.insert(newArgs, 1, dir)
-		end
+        snap_active = true
+    end
 
-		return newArgs
-	end
+    local function restore()
+        if saved_cam then
+            Camera.CFrame = saved_cam
+            saved_cam = nil
+        end
+        if saved_hrp then
+            local char = LP.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then hrp.CFrame = saved_hrp end
+            saved_hrp = nil
+        end
+        snap_active = false
+    end
 
-	-- hook __namecall em FireServer / InvokeServer
-	local oldNamecall
-	oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-		local method = getnamecallmethod()
-		if not cfg.enabled then
-			return oldNamecall(self, ...)
-		end
+    local function on_fire(_, state)
+        if state ~= Enum.UserInputState.Begin then
+            return Enum.ContextActionResult.Pass
+        end
+        if not cfg.enabled then
+            return Enum.ContextActionResult.Pass
+        end
+        local t = get_target()
+        if not t then
+            return Enum.ContextActionResult.Pass
+        end
+        snap_to(t)
+        return Enum.ContextActionResult.Pass
+    end
 
-		if typeof(self) == "Instance"
-			and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction"))
-			and (method == "FireServer" or method == "InvokeServer") then
-			local name = string.lower(self.Name)
-			if string.find(name, "shoot")
-				or string.find(name, "fire")
-				or string.find(name, "gun")
-				or string.find(name, "knife")
-				or string.find(name, "stab")
-				or string.find(name, "throw")
-				or string.find(name, "hit")
-				or string.find(name, "attack")
-				or string.find(name, "bullet")
-				or string.find(name, "projectile")
-				or string.find(name, "replicate") then
-				local args = { ... }
-				local newArgs = redirect_args(args)
-				return oldNamecall(self, table.unpack(newArgs))
-			end
-		end
+    RunService.RenderStepped:Connect(function()
+        -- devolve tudo no próximo frame
+        if snap_active then restore() end
 
-		return oldNamecall(self, ...)
-	end))
+        fov_circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        fov_circle.Radius = cfg.fov
+        fov_circle.Visible = cfg.enabled
+        fov_circle.Color = get_target() and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(255, 255, 255)
+    end)
 
-	-- também cobre o caso de :FireServer chamado via índice (sem namecall)
-	local function hook_remote(remote)
-		if not remote or remote:GetAttribute("KVGD_Hooked") then return end
-		remote:SetAttribute("KVGD_Hooked", true)
+    CAS:BindAction("KVGD_SnapFire", on_fire, false,
+        Enum.UserInputType.MouseButton1,
+        Enum.KeyCode.ButtonR2,
+        Enum.KeyCode.E
+    )
 
-		if remote:IsA("RemoteEvent") then
-			local old
-			old = hookfunction(remote.FireServer, newcclosure(function(self, ...)
-				if not cfg.enabled then return old(self, ...) end
-				local args = { ... }
-				local newArgs = redirect_args(args)
-				return old(self, table.unpack(newArgs))
-			end))
-		elseif remote:IsA("RemoteFunction") then
-			local old
-			old = hookfunction(remote.InvokeServer, newcclosure(function(self, ...)
-				if not cfg.enabled then return old(self, ...) end
-				local args = { ... }
-				local newArgs = redirect_args(args)
-				return old(self, table.unpack(newArgs))
-			end))
-		end
-	end
+    UIS.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == Enum.KeyCode.End then
+            cfg.enabled = not cfg.enabled
+            Core.save()
+            print("[AIM] " .. tostring(cfg.enabled))
+        end
+    end)
 
-	local function scan_remotes()
-		for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-			if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-				local n = string.lower(obj.Name)
-				if string.find(n, "shoot") or string.find(n, "fire") or string.find(n, "gun")
-					or string.find(n, "knife") or string.find(n, "stab") or string.find(n, "throw")
-					or string.find(n, "hit") or string.find(n, "attack") or string.find(n, "bullet")
-					or string.find(n, "projectile") or string.find(n, "replicate") then
-					pcall(hook_remote, obj)
-				end
-			end
-		end
-	end
+    getgenv().AimFOV = function(v) cfg.fov = v; Core.save(); print("[AIM] FOV = " .. v) end
+    getgenv().AimPart = function(v) cfg.hit_part = v; Core.save(); print("[AIM] hit = " .. v) end
 
-	scan_remotes()
-	ReplicatedStorage.DescendantAdded:Connect(function(obj)
-		if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-			task.defer(function() pcall(hook_remote, obj) end)
-		end
-	end)
-
-	Core.bind_toggle(cfg.keybind or "End", function() return cfg.enabled end, function(v) cfg.enabled = v end, "AIM")
-
-	RunService.RenderStepped:Connect(function()
-		if not cfg.show_fov then
-			fovCircle.Visible = false
-			return
-		end
-		local vp = Camera.ViewportSize
-		fovCircle.Position = Vector2.new(vp.X / 2, vp.Y / 2)
-		fovCircle.Radius = 80
-		fovCircle.Visible = cfg.enabled
-		local t = get_target()
-		fovCircle.Color = t and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(200, 200, 200)
-	end)
-
-	getgenv().AimPart = function(v)
-		cfg.hit_part = tostring(v)
-		Core.save()
-		print("[AIM] hit = " .. cfg.hit_part)
-	end
-
-	getgenv().AimShowFOV = function(v)
-		cfg.show_fov = v and true or false
-		Core.save()
-	end
-
-	print("[AIM] teleguiado ativo — " .. (cfg.keybind or "End") .. " toggle | independente de FOV/câmera")
+    print("[AIM] carregado — End toggle | snap câmera+corpo")
 end
 
 print("[AIM] módulo definido")
