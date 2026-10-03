@@ -1,5 +1,6 @@
 -- language: Lua, file: kill_aura.lua
--- ataca só o player do duelo atual. K toggle.
+-- ataca o oponente do duelo se estiver em duelo.
+-- senão, ataca o inimigo mais próximo. K toggle.
 
 getgenv().KVGD_kill_aura = function(Core)
     local Players = game:GetService("Players")
@@ -7,13 +8,13 @@ getgenv().KVGD_kill_aura = function(Core)
     local UIS = game:GetService("UserInputService")
     local CAS = game:GetService("ContextActionService")
     local LP = Players.LocalPlayer
-    local cfg = Core.config.silent
 
     local state = {
         enabled = true,
         verbose = true,
         cooldown = 0.5,
         require_tool = true,
+        fallback_range = 200,   -- se não tiver duelo, ataca quem estiver mais perto que isso
     }
 
     local last_attack = 0
@@ -35,23 +36,51 @@ getgenv().KVGD_kill_aura = function(Core)
         print("[AURA] " .. #remotes .. " remotes coletados")
     end
 
-    -- acha o oponente do duelo atual
-    local function get_duel_opponent()
+    -- tenta pelo CurrentDuel
+    local function get_by_duel()
         local my_duel = LP:GetAttribute("CurrentDuel")
         if not my_duel then return nil end
-
-        -- procura o player que tem o MESMO CurrentDuel
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LP and p:GetAttribute("CurrentDuel") == my_duel then
                 local char = p.Character
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
                 if hum and hrp and hum.Health > 0 then
-                    return { player = p, char = char, hrp = hrp, hum = hum, duel = my_duel }
+                    return { player = p, char = char, hrp = hrp, hum = hum }
                 end
             end
         end
         return nil
+    end
+
+    -- fallback: inimigo vivo mais próximo
+    local function get_by_proximity()
+        local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if not me then return nil end
+
+        local best, best_d = nil, state.fallback_range
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP then
+                local char = p.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hum and hrp and hum.Health > 0 then
+                    local d = (hrp.Position - me.Position).Magnitude
+                    if d < best_d then
+                        best, best_d = { player = p, char = char, hrp = hrp, hum = hum }, d
+                    end
+                end
+            end
+        end
+        return best
+    end
+
+    local function get_target()
+        local t = get_by_duel()
+        if t then return t, "duelo" end
+        t = get_by_proximity()
+        if t then return t, "proximidade" end
+        return nil, nil
     end
 
     local function has_tool_equipped()
@@ -73,7 +102,7 @@ getgenv().KVGD_kill_aura = function(Core)
         end)
     end
 
-    local function attack_opponent()
+    local function attack()
         if not state.enabled then return end
         if state.require_tool and not has_tool_equipped() then return end
 
@@ -84,33 +113,30 @@ getgenv().KVGD_kill_aura = function(Core)
         local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
         if not me then return end
 
-        local target = get_duel_opponent()
+        local target, mode = get_target()
         if not target then
-            if state.verbose then print("[AURA] sem oponente de duelo") end
+            if state.verbose then print("[AURA] nenhum alvo") end
             return
         end
 
         local vec_unit = (target.hrp.Position - me.Position).Unit
-        local vec_pos  = target.hrp.Position
-        local cf       = CFrame.new(me.Position, target.hrp.Position)
-
         for _, remote in ipairs(remotes) do
             fire(remote, { vec_unit })
         end
 
         if state.verbose then
-            print("[AURA] atacou " .. target.player.Name .. " (duelo " .. tostring(target.duel) .. ")")
+            print("[AURA] atacou " .. target.player.Name .. " (" .. mode .. ")")
         end
     end
 
     CAS:BindAction("KVGD_AuraClick", function(_, s)
-        if s == Enum.UserInputState.Begin then attack_opponent() end
+        if s == Enum.UserInputState.Begin then attack() end
         return Enum.ContextActionResult.Pass
     end, false, Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR2)
 
     UIS.InputBegan:Connect(function(input, gpe)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            attack_opponent()
+            attack()
         end
         if input.KeyCode == Enum.KeyCode.K and not gpe then
             state.enabled = not state.enabled
@@ -118,15 +144,16 @@ getgenv().KVGD_kill_aura = function(Core)
         end
     end)
 
-    UIS.TouchStarted:Connect(function() attack_opponent() end)
+    UIS.TouchStarted:Connect(function() attack() end)
 
     getgenv().AuraToggle = function(v) state.enabled = v; print("[AURA] " .. tostring(v)) end
     getgenv().AuraCooldown = function(v) state.cooldown = v; print("[AURA] cooldown = " .. v) end
     getgenv().AuraVerbose = function(v) state.verbose = v end
     getgenv().AuraRequireTool = function(v) state.require_tool = v end
+    getgenv().AuraRange = function(v) state.fallback_range = v; print("[AURA] range = " .. v) end
 
     collect_remotes()
-    print("[AURA] carregado — clica com a faca | K toggle")
+    print("[AURA] carregado — clica | K toggle | AuraRange(n)")
 end
 
 print("[AURA] módulo definido")
