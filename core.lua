@@ -45,11 +45,6 @@ local function load_config()
         size = 8,
         transparency = 0.6
     }
-    Core.config.lootbox = Core.config.lootbox or {
-        enabled = false,
-        best_item = "",
-        chance = 0.8
-    }
 end
 
 function Core.register_hook(remote_path, method, cb)
