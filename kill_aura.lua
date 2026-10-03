@@ -1,5 +1,5 @@
 -- language: Lua, file: kill_aura.lua
--- spam FireServer em TODOS os inimigos do servidor, sem filtro de raio.
+-- tenta TODOS os remotes de arma com TODOS os formatos de args.
 -- K toggle.
 
 getgenv().KVGD_kill_aura = function(Core)
@@ -11,10 +11,15 @@ getgenv().KVGD_kill_aura = function(Core)
 
     local state = {
         enabled = false,
-        delay = 0.05,
-        use_knife = true,
-        use_gun = true,
-        only_current_weapon = true
+        delay = 0.1,
+        verbose = true
+    }
+
+    -- todos os remotes candidatos
+    local CANDIDATES = {
+        "ShootGun", "KnifeStab", "KnifeThrow",
+        "ReplicateShot", "GiveRodaShot",
+        "HitRemote", "DamageRemote", "Attack", "Hit"
     }
 
     local function is_teammate(player)
@@ -23,16 +28,26 @@ getgenv().KVGD_kill_aura = function(Core)
         return a and b and a == b
     end
 
-    local function find_remote(name)
+    local remotes = {}
+
+    local function collect_remotes()
+        remotes = {}
         for _, obj in ipairs(RS:GetDescendants()) do
-            if obj.Name == name and (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")) then
-                return obj
+            if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+                for _, name in ipairs(CANDIDATES) do
+                    if obj.Name == name then
+                        table.insert(remotes, obj)
+                        if state.verbose then
+                            print("[AURA] candidato: " .. obj:GetFullName())
+                        end
+                        break
+                    end
+                end
             end
         end
-        return nil
+        print("[AURA] " .. #remotes .. " remotes coletados")
     end
 
-    -- pega todos os inimigos vivos, sem filtro de distância
     local function get_all_enemies()
         local list = {}
         for _, p in ipairs(Players:GetPlayers()) do
@@ -41,49 +56,53 @@ getgenv().KVGD_kill_aura = function(Core)
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
                 if hum and hrp and hum.Health > 0 then
-                    table.insert(list, hrp)
+                    table.insert(list, { player = p, char = char, hrp = hrp, hum = hum })
                 end
             end
         end
         return list
     end
 
-    -- arma equipada no momento
-    local function current_weapon()
-        local char = LP.Character
-        if not char then return nil end
-        for _, tool in ipairs(char:GetChildren()) do
-            if tool:IsA("Tool") then
-                return tool.Name
+    -- dispara um remote com um formato específico de args
+    local function fire(remote, args)
+        local ok, err = pcall(function()
+            if remote:IsA("RemoteEvent") then
+                remote:FireServer(table.unpack(args))
+            else
+                remote:InvokeServer(table.unpack(args))
             end
-        end
-        return nil
+        end)
+        return ok
     end
 
     task.spawn(function()
         while true do
             task.wait(state.delay)
             if state.enabled and LP.Character then
-                local targets = get_all_enemies()
-                if #targets > 0 then
-                    local me = LP.Character:FindFirstChild("HumanoidRootPart")
-                    if me then
-                        local weapon = current_weapon()
-                        local kn = find_remote("KnifeStab")
-                        local gun = find_remote("ShootGun")
+                local me = LP.Character:FindFirstChild("HumanoidRootPart")
+                if me then
+                    local targets = get_all_enemies()
+                    for _, t in ipairs(targets) do
+                        -- calcula formatos diferentes de argumento
+                        local vec_unit = (t.hrp.Position - me.Position).Unit
+                        local vec_pos  = t.hrp.Position
+                        local cf       = CFrame.new(me.Position, t.hrp.Position)
+                        local name     = t.player.Name
+                        local char     = t.char
+                        local hrp      = t.hrp
 
-                        for _, hrp in ipairs(targets) do
-                            local vec = (hrp.Position - me.Position).Unit
-                            pcall(function()
-                                if kn and (not state.only_current_weapon or (weapon and weapon:lower():find("knife"))) then
-                                    kn:FireServer(vec)
-                                end
-                            end)
-                            pcall(function()
-                                if gun and (not state.only_current_weapon or (weapon and not weapon:lower():find("knife"))) then
-                                    gun:FireServer(vec)
-                                end
-                            end)
+                        for _, remote in ipairs(remotes) do
+                            -- tenta cada formato
+                            fire(remote, { vec_unit })
+                            fire(remote, { vec_pos })
+                            fire(remote, { cf })
+                            fire(remote, { hrp })
+                            fire(remote, { char })
+                            fire(remote, { name })
+                            fire(remote, { me.Position, vec_unit })
+                            fire(remote, { t.player })
+                            fire(remote, { hrp.Position, hrp })
+                            fire(remote, {})
                         end
                     end
                 end
@@ -95,17 +114,24 @@ getgenv().KVGD_kill_aura = function(Core)
         if gpe then return end
         if input.KeyCode == Enum.KeyCode.K then
             state.enabled = not state.enabled
+            if state.enabled and #remotes == 0 then
+                collect_remotes()
+            end
             print("[AURA] " .. tostring(state.enabled))
         end
     end)
 
-    getgenv().AuraToggle = function(v) state.enabled = v; print("[AURA] " .. tostring(v)) end
-    getgenv().AuraDelay = function(v) state.delay = v; print("[AURA] delay = " .. v) end
-    getgenv().AuraOnlyCurrent = function(v) state.only_current_weapon = v; print("[AURA] only_current = " .. tostring(v)) end
-    getgenv().AuraKnife = function(v) state.use_knife = v end
-    getgenv().AuraGun = function(v) state.use_gun = v end
+    getgenv().AuraToggle = function(v)
+        state.enabled = v
+        if v and #remotes == 0 then collect_remotes() end
+        print("[AURA] " .. tostring(v))
+    end
+    getgenv().AuraDelay = function(v) state.delay = v end
+    getgenv().AuraVerbose = function(v) state.verbose = v end
+    getgenv().AuraRemotes = function() return remotes end
 
-    print("[AURA] carregado — K toggle | AuraDelay(s)")
+    collect_remotes()
+    print("[AURA] carregado — K toggle")
 end
 
 print("[AURA] módulo definido")
