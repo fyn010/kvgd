@@ -1,6 +1,6 @@
 # kvgd
 
-suite modular de scripts de combate para roblox (executor).
+suite modular para **Knife VS Gun DUELS** (place 120700541929930).
 
 ## módulos
 
@@ -8,9 +8,9 @@ suite modular de scripts de combate para roblox (executor).
 |---------|--------|--------|
 | `core.lua` | config + helpers | — |
 | `esp.lua` | tracers + distância | Delete |
-| `silent_aim.lua` | silent aim (mouse) | End |
+| `silent_aim.lua` | silent aim (mouse) + prioriza CurrentDuel | End |
 | `hitbox.lua` | expand hitbox | H |
-| `kill_aura.lua` | auto ataque | K |
+| `kill_aura.lua` | auto ataque (ShootGun / KnifeThrow / etc) | K |
 | `loader.lua` | entry point | — |
 
 ## uso
@@ -19,7 +19,7 @@ suite modular de scripts de combate para roblox (executor).
 loadstring(game:HttpGet("https://raw.githubusercontent.com/fyn010/kvgd/main/loader.lua"))()
 ```
 
-## helpers runtime
+## helpers
 
 ```lua
 ESPColor("enemy", 255, 0, 0)
@@ -29,12 +29,13 @@ HitboxToggle(true)
 HitboxSize(10)
 AuraToggle(true)
 AuraRange(250)
-AuraCooldown(0.4)
+AuraCooldown(0.35)
+AuraRefresh()
 ```
 
-## notas
+## notas (Knife VS Gun DUELS)
 
-- config salva em `kvgd_config.json`
-- silent aim usa `mousemoverel` (mais stealth que snap de CFrame)
-- hitbox limpa memória com weak table + CharacterRemoving
-- kill_aura prioriza `CurrentDuel`, senão proximidade
+- silent aim e kill aura priorizam oponente com o mesmo `CurrentDuel`
+- kill aura escuta click, R2 e **E** (throw knife)
+- remotes: ShootGun, KnifeStab, KnifeThrow, ReplicateShot, GiveRodaShot + busca por nome parcial
+- config em `kvgd_config.json`

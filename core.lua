@@ -58,7 +58,7 @@ local function load_config()
 	Core.config.aura = Core.config.aura or {
 		enabled = true,
 		verbose = false,
-		cooldown = 0.45,
+		cooldown = 0.35,
 		require_tool = true,
 		fallback_range = 200,
 		keybind = "K"

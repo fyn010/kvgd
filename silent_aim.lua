@@ -1,5 +1,5 @@
 -- language: Lua, file: silent_aim.lua
--- silent aim via mouse move (stealth) + restore. Toggle: End
+-- Knife VS Gun DUELS: mouse silent + prioriza oponente do CurrentDuel. Toggle: End
 
 getgenv().KVGD_silent_aim = function(Core)
 	local Players = game:GetService("Players")
@@ -19,12 +19,37 @@ getgenv().KVGD_silent_aim = function(Core)
 	local cachedTarget = nil
 	local lastCache = 0
 
+	local function get_duel_opponent()
+		local myDuel = LP:GetAttribute("CurrentDuel")
+		if not myDuel then return nil end
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= LP and p:GetAttribute("CurrentDuel") == myDuel then
+				local char = p.Character
+				if char then
+					local part = char:FindFirstChild(cfg.hit_part or "Head") or char:FindFirstChild("Head")
+					local hum = char:FindFirstChildOfClass("Humanoid")
+					if part and hum and hum.Health > 0 then
+						return part
+					end
+				end
+			end
+		end
+		return nil
+	end
+
 	local function get_target()
 		local now = tick()
 		if now - lastCache < 0.016 and cachedTarget and cachedTarget.Parent then
 			return cachedTarget
 		end
 		lastCache = now
+
+		-- prioridade: oponente do duelo atual
+		local duelPart = get_duel_opponent()
+		if duelPart then
+			cachedTarget = duelPart
+			return duelPart
+		end
 
 		local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 		local best, bestD = nil, cfg.fov or 200
@@ -60,7 +85,7 @@ getgenv().KVGD_silent_aim = function(Core)
 		local mouse = UserInputService:GetMouseLocation()
 		local dx = sp.X - mouse.X
 		local dy = sp.Y - mouse.Y
-		local smooth = 0.85
+		local smooth = 0.9
 
 		if mousemoverel then
 			mousemoverel(dx * smooth, dy * smooth)
@@ -74,7 +99,8 @@ getgenv().KVGD_silent_aim = function(Core)
 	UserInputService.InputBegan:Connect(function(input, gpe)
 		if gpe or not cfg.enabled then return end
 		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.KeyCode == Enum.KeyCode.ButtonR2 then
+			or input.KeyCode == Enum.KeyCode.ButtonR2
+			or input.KeyCode == Enum.KeyCode.E then
 			local t = get_target()
 			if t then aim_mouse(t) end
 		end
@@ -101,7 +127,7 @@ getgenv().KVGD_silent_aim = function(Core)
 		print("[AIM] hit = " .. cfg.hit_part)
 	end
 
-	print("[AIM] carregado — " .. (cfg.keybind or "End") .. " toggle | mouse silent")
+	print("[AIM] carregado (Knife VS Gun DUELS) — " .. (cfg.keybind or "End") .. " | prioriza CurrentDuel")
 end
 
 print("[AIM] módulo definido")

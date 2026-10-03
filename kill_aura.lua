@@ -1,5 +1,6 @@
 -- language: Lua, file: kill_aura.lua
--- kill aura: prioriza duelo, senão proximidade. Toggle: K
+-- Knife VS Gun DUELS focused. Prioriza CurrentDuel, senão proximidade.
+-- Remotes comuns: ShootGun, KnifeStab, KnifeThrow, ReplicateShot, GiveRodaShot
 
 getgenv().KVGD_kill_aura = function(Core)
 	local Players = game:GetService("Players")
@@ -9,17 +10,33 @@ getgenv().KVGD_kill_aura = function(Core)
 	local cfg = Core.config.aura
 
 	local lastAttack = 0
-	local CANDIDATES = { "ShootGun", "KnifeStab", "KnifeThrow", "ReplicateShot", "GiveRodaShot" }
+	local CANDIDATES = {
+		"ShootGun", "KnifeStab", "KnifeThrow", "ReplicateShot", "GiveRodaShot",
+		"Shoot", "Fire", "ThrowKnife", "Stab", "Attack", "Hit"
+	}
 	local remotes = {}
 
 	local function collect_remotes()
 		remotes = {}
 		for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
 			if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-				for _, name in ipairs(CANDIDATES) do
-					if obj.Name == name then
+				local n = obj.Name
+				for _, cand in ipairs(CANDIDATES) do
+					if n == cand or string.find(string.lower(n), string.lower(cand)) then
 						table.insert(remotes, obj)
 						break
+					end
+				end
+			end
+		end
+		-- também procura em folders comuns de duelo
+		local duelFolder = ReplicatedStorage:FindFirstChild("Duels") or ReplicatedStorage:FindFirstChild("Combat") or ReplicatedStorage:FindFirstChild("Remotes")
+		if duelFolder then
+			for _, obj in ipairs(duelFolder:GetDescendants()) do
+				if (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")) and not table.find(remotes, obj) then
+					local n = string.lower(obj.Name)
+					if string.find(n, "shoot") or string.find(n, "knife") or string.find(n, "stab") or string.find(n, "throw") or string.find(n, "hit") or string.find(n, "attack") then
+						table.insert(remotes, obj)
 					end
 				end
 			end
@@ -93,7 +110,7 @@ getgenv().KVGD_kill_aura = function(Core)
 		if cfg.require_tool and not has_tool() then return end
 
 		local now = tick()
-		if now - lastAttack < (cfg.cooldown or 0.45) then return end
+		if now - lastAttack < (cfg.cooldown or 0.35) then return end
 		lastAttack = now
 
 		local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
@@ -105,10 +122,18 @@ getgenv().KVGD_kill_aura = function(Core)
 			return
 		end
 
-		local dir = (target.hrp.Position - me.Position).Unit
+		local origin = me.Position
+		local dir = (target.hrp.Position - origin).Unit
+		local head = target.player.Character and target.player.Character:FindFirstChild("Head")
+		local aimPos = head and head.Position or target.hrp.Position
+
 		for _, remote in ipairs(remotes) do
+			-- formatos comuns em Knife VS Gun DUELS / duelo pads
 			fire(remote, { dir })
-			fire(remote, { me.Position, dir })
+			fire(remote, { origin, dir })
+			fire(remote, { aimPos })
+			fire(remote, { origin, aimPos })
+			fire(remote, { target.player })
 		end
 
 		if cfg.verbose then
@@ -118,7 +143,8 @@ getgenv().KVGD_kill_aura = function(Core)
 
 	UserInputService.InputBegan:Connect(function(input, gpe)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.KeyCode == Enum.KeyCode.ButtonR2 then
+			or input.KeyCode == Enum.KeyCode.ButtonR2
+			or input.KeyCode == Enum.KeyCode.E then -- E = throw knife no jogo
 			attack()
 		end
 	end)
@@ -131,11 +157,9 @@ getgenv().KVGD_kill_aura = function(Core)
 
 	ReplicatedStorage.DescendantAdded:Connect(function(obj)
 		if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
-			for _, name in ipairs(CANDIDATES) do
-				if obj.Name == name then
-					table.insert(remotes, obj)
-					break
-				end
+			local n = string.lower(obj.Name)
+			if string.find(n, "shoot") or string.find(n, "knife") or string.find(n, "stab") or string.find(n, "throw") or string.find(n, "hit") or string.find(n, "attack") or string.find(n, "fire") then
+				table.insert(remotes, obj)
 			end
 		end
 	end)
@@ -145,9 +169,10 @@ getgenv().KVGD_kill_aura = function(Core)
 	getgenv().AuraVerbose = function(v) cfg.verbose = v and true or false end
 	getgenv().AuraRequireTool = function(v) cfg.require_tool = v and true or false end
 	getgenv().AuraRange = function(v) cfg.fallback_range = tonumber(v) or cfg.fallback_range; Core.save(); print("[AURA] range = " .. cfg.fallback_range) end
+	getgenv().AuraRefresh = function() collect_remotes(); print("[AURA] refreshed " .. #remotes) end
 
 	collect_remotes()
-	print("[AURA] carregado — click ataca | " .. (cfg.keybind or "K") .. " toggle")
+	print("[AURA] carregado (Knife VS Gun DUELS) — click/E ataca | " .. (cfg.keybind or "K") .. " toggle")
 end
 
 print("[AURA] módulo definido")
