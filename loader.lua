@@ -49,8 +49,8 @@ if getgenv().KVGD_silent_aim then getgenv().KVGD_silent_aim(Core) end
 run_module("hitbox")
 if getgenv().KVGD_hitbox then getgenv().KVGD_hitbox(Core) end
 
-run_module("lootbox")
-if getgenv().KVGD_lootbox then getgenv().KVGD_lootbox(Core) end
+run_module("kill_aura")
+if getgenv().KVGD_kill_aura then getgenv().KVGD_kill_aura(Core) end
 
 Core.attach()
 
