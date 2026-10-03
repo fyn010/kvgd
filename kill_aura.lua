@@ -1,5 +1,5 @@
 -- language: Lua, file: kill_aura.lua
--- on-click, com cooldown. K toggle.
+-- ataca só o player do duelo atual. K toggle.
 
 getgenv().KVGD_kill_aura = function(Core)
     local Players = game:GetService("Players")
@@ -12,24 +12,13 @@ getgenv().KVGD_kill_aura = function(Core)
     local state = {
         enabled = true,
         verbose = true,
-        require_knife = false,
-        cooldown = 0.5,       -- tempo mínimo entre ataques (segundos)
-        attack_once = true,   -- ataca só 1x por clique, não 5x por remote
+        cooldown = 0.5,
+        require_tool = true,
     }
 
     local last_attack = 0
     local CANDIDATES = { "ShootGun", "KnifeStab", "KnifeThrow", "ReplicateShot", "GiveRodaShot" }
     local remotes = {}
-
-    local function is_teammate(player)
-        if not cfg.team_check or player == LP then return true end
-        -- checa Team E TeamColor (alguns jogos usam um ou outro)
-        local a, b = LP.Team, player.Team
-        if a and b then return a == b end
-        local ca, cb = LP.TeamColor, player.TeamColor
-        if ca and cb then return ca == cb end
-        return false
-    end
 
     local function collect_remotes()
         remotes = {}
@@ -46,19 +35,23 @@ getgenv().KVGD_kill_aura = function(Core)
         print("[AURA] " .. #remotes .. " remotes coletados")
     end
 
-    local function get_all_enemies()
-        local list = {}
+    -- acha o oponente do duelo atual
+    local function get_duel_opponent()
+        local my_duel = LP:GetAttribute("CurrentDuel")
+        if not my_duel then return nil end
+
+        -- procura o player que tem o MESMO CurrentDuel
         for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LP and not is_teammate(p) then
+            if p ~= LP and p:GetAttribute("CurrentDuel") == my_duel then
                 local char = p.Character
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
                 if hum and hrp and hum.Health > 0 then
-                    table.insert(list, { player = p, char = char, hrp = hrp, hum = hum })
+                    return { player = p, char = char, hrp = hrp, hum = hum, duel = my_duel }
                 end
             end
         end
-        return list
+        return nil
     end
 
     local function has_tool_equipped()
@@ -80,11 +73,10 @@ getgenv().KVGD_kill_aura = function(Core)
         end)
     end
 
-    local function attack_all()
+    local function attack_opponent()
         if not state.enabled then return end
-        if state.require_knife and not has_tool_equipped() then return end
+        if state.require_tool and not has_tool_equipped() then return end
 
-        -- cooldown global
         local now = tick()
         if now - last_attack < state.cooldown then return end
         last_attack = now
@@ -92,62 +84,49 @@ getgenv().KVGD_kill_aura = function(Core)
         local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
         if not me then return end
 
-        local targets = get_all_enemies()
-        if #targets == 0 then
-            if state.verbose then print("[AURA] nenhum inimigo") end
+        local target = get_duel_opponent()
+        if not target then
+            if state.verbose then print("[AURA] sem oponente de duelo") end
             return
         end
 
-        for _, t in ipairs(targets) do
-            local vec_unit = (t.hrp.Position - me.Position).Unit
-            local vec_pos  = t.hrp.Position
-            local cf       = CFrame.new(me.Position, t.hrp.Position)
+        local vec_unit = (target.hrp.Position - me.Position).Unit
+        local vec_pos  = target.hrp.Position
+        local cf       = CFrame.new(me.Position, target.hrp.Position)
 
-            for _, remote in ipairs(remotes) do
-                -- só um formato por vez (reduz volume de FireServer)
-                fire(remote, { vec_unit })
-                if not state.attack_once then
-                    fire(remote, { vec_pos })
-                    fire(remote, { cf })
-                    fire(remote, { t.hrp })
-                    fire(remote, { t.char })
-                end
-            end
+        for _, remote in ipairs(remotes) do
+            fire(remote, { vec_unit })
         end
 
         if state.verbose then
-            print("[AURA] atacou " .. #targets .. " inimigo(s)")
+            print("[AURA] atacou " .. target.player.Name .. " (duelo " .. tostring(target.duel) .. ")")
         end
     end
 
-    CAS:BindAction("KVGD_AuraClick", function(_, state_)
-        if state_ == Enum.UserInputState.Begin then
-            attack_all()
-        end
+    CAS:BindAction("KVGD_AuraClick", function(_, s)
+        if s == Enum.UserInputState.Begin then attack_opponent() end
         return Enum.ContextActionResult.Pass
     end, false, Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR2)
 
     UIS.InputBegan:Connect(function(input, gpe)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            attack_all()
+            attack_opponent()
         end
-
         if input.KeyCode == Enum.KeyCode.K and not gpe then
             state.enabled = not state.enabled
             print("[AURA] " .. tostring(state.enabled))
         end
     end)
 
-    UIS.TouchStarted:Connect(function() attack_all() end)
+    UIS.TouchStarted:Connect(function() attack_opponent() end)
 
     getgenv().AuraToggle = function(v) state.enabled = v; print("[AURA] " .. tostring(v)) end
     getgenv().AuraCooldown = function(v) state.cooldown = v; print("[AURA] cooldown = " .. v) end
-    getgenv().AuraRequireKnife = function(v) state.require_knife = v end
     getgenv().AuraVerbose = function(v) state.verbose = v end
-    getgenv().AuraAttackOnce = function(v) state.attack_once = v end
+    getgenv().AuraRequireTool = function(v) state.require_tool = v end
 
     collect_remotes()
-    print("[AURA] carregado — clica | cooldown padrão 0.5s | K toggle")
+    print("[AURA] carregado — clica com a faca | K toggle")
 end
 
 print("[AURA] módulo definido")
