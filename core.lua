@@ -51,7 +51,7 @@ local function load_config()
 	Core.config.hitbox = Core.config.hitbox or {
 		enabled = false,
 		size = 8,
-		transparency = 0.6,
+		transparency = 0.35,
 		keybind = "H"
 	}
 

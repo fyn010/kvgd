@@ -1,6 +1,6 @@
 -- language: Lua, file: hitbox.lua
--- Knife VS Gun DUELS: expand só do oponente do duelo / inimigo próximo.
--- Não toca em HRP, não mexe CanCollide de tudo, restaura limpo. Toggle: H
+-- Knife VS Gun DUELS: expand hitbox sem deixar invisível.
+-- Só Head/Torso, nunca HRP, only_duel default. Toggle: H
 
 getgenv().KVGD_hitbox = function(Core)
 	local Players = game:GetService("Players")
@@ -9,13 +9,14 @@ getgenv().KVGD_hitbox = function(Core)
 	local cfg = Core.config.hitbox
 
 	cfg.size = cfg.size or 6
-	cfg.transparency = cfg.transparency or 0.7
-	cfg.only_duel = cfg.only_duel ~= false -- default true: só oponente do duelo
-	cfg.parts = cfg.parts or { "Head", "UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart" }
-	-- por padrão NÃO expandimos HRP de verdade (só visual se quiser); lista acima é whitelist
+	-- transparency baixa = quase opaco (0 = sólido, 1 = invisível)
+	-- default 0.35 pra ver o expand sem sumir o player
+	cfg.transparency = (cfg.transparency ~= nil and cfg.transparency < 0.8) and cfg.transparency or 0.35
+	cfg.only_duel = cfg.only_duel ~= false
+	cfg.parts = cfg.parts or { "Head", "UpperTorso", "LowerTorso", "Torso" }
 
 	local original = setmetatable({}, { __mode = "k" })
-	local applied = setmetatable({}, { __mode = "k" }) -- part -> true
+	local applied = setmetatable({}, { __mode = "k" })
 
 	local function restore_part(part)
 		if not part or not part.Parent then
@@ -28,7 +29,6 @@ getgenv().KVGD_hitbox = function(Core)
 			pcall(function()
 				part.Size = data.Size
 				part.Transparency = data.Transparency
-				-- não mexemos CanCollide de volta se o jogo já controla
 			end)
 			original[part] = nil
 			applied[part] = nil
@@ -43,14 +43,10 @@ getgenv().KVGD_hitbox = function(Core)
 
 	local function should_expand_part(part)
 		if not part:IsA("BasePart") then return false end
-		if part.Name == "HumanoidRootPart" then return false end -- nunca expandir HRP (bug comum)
+		if part.Name == "HumanoidRootPart" then return false end
 		local name = part.Name
 		for _, allowed in ipairs(cfg.parts) do
 			if name == allowed then return true end
-		end
-		-- fallback: só torso/head se a lista não bater
-		if name == "Head" or name == "Torso" or name == "UpperTorso" or name == "LowerTorso" then
-			return true
 		end
 		return false
 	end
@@ -66,10 +62,13 @@ getgenv().KVGD_hitbox = function(Core)
 					}
 				end
 				local s = cfg.size
-				-- não deixa menor que o original
-				local ox, oy, oz = original[part].Size.X, original[part].Size.Y, original[part].Size.Z
+				local ox = original[part].Size.X
+				local oy = original[part].Size.Y
+				local oz = original[part].Size.Z
 				part.Size = Vector3.new(math.max(s, ox), math.max(s, oy), math.max(s, oz))
-				part.Transparency = cfg.transparency
+				-- NUNCA deixa mais transparente que 0.5 (evita "invisível")
+				local t = math.clamp(cfg.transparency or 0.35, 0, 0.5)
+				part.Transparency = t
 				applied[part] = true
 			end
 		end
@@ -89,7 +88,6 @@ getgenv().KVGD_hitbox = function(Core)
 			return list
 		end
 
-		-- senão: inimigos vivos próximos
 		local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
 		if not me then return list end
 		for _, p in ipairs(Players:GetPlayers()) do
@@ -119,7 +117,6 @@ getgenv().KVGD_hitbox = function(Core)
 			end
 		end
 
-		-- restaura partes que não são mais target
 		for part in pairs(original) do
 			if not keep[part] then
 				restore_part(part)
@@ -127,11 +124,10 @@ getgenv().KVGD_hitbox = function(Core)
 		end
 	end
 
-	-- loop mais leve: Heartbeat mas com throttle
 	local acc = 0
 	RunService.Heartbeat:Connect(function(dt)
 		acc = acc + dt
-		if acc < 0.1 then return end -- 10 Hz
+		if acc < 0.12 then return end
 		acc = 0
 		tick_expand()
 	end)
@@ -147,7 +143,6 @@ getgenv().KVGD_hitbox = function(Core)
 	Core.bind_toggle(cfg.keybind or "H", function() return cfg.enabled end, set_enabled, "HITBOX")
 
 	Players.PlayerRemoving:Connect(function()
-		-- limpa refs mortas
 		for part in pairs(original) do
 			if not part.Parent then
 				original[part] = nil
@@ -167,13 +162,20 @@ getgenv().KVGD_hitbox = function(Core)
 		print("[HITBOX] size = " .. cfg.size)
 	end
 
+	getgenv().HitboxTransparency = function(v)
+		-- força máximo 0.5 pra não sumir
+		cfg.transparency = math.clamp(tonumber(v) or 0.35, 0, 0.5)
+		Core.save()
+		print("[HITBOX] transparency = " .. cfg.transparency)
+	end
+
 	getgenv().HitboxOnlyDuel = function(v)
 		cfg.only_duel = v and true or false
 		Core.save()
 		print("[HITBOX] only_duel = " .. tostring(cfg.only_duel))
 	end
 
-	print("[HITBOX] carregado — " .. (cfg.keybind or "H") .. " | só torso/head | only_duel=" .. tostring(cfg.only_duel))
+	print("[HITBOX] carregado — " .. (cfg.keybind or "H") .. " | transparency max 0.5 | only_duel=" .. tostring(cfg.only_duel))
 end
 
 print("[HITBOX] módulo definido")
