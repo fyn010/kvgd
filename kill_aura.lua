@@ -1,25 +1,21 @@
 -- language: Lua, file: kill_aura.lua
--- dispara em TODOS os inimigos quando você clica com faca equipada.
--- sem loop contínuo. K toggle ON/OFF.
+-- on-click, sem filtro de gpe, com log visível. K toggle.
 
 getgenv().KVGD_kill_aura = function(Core)
     local Players = game:GetService("Players")
     local RS = game:GetService("ReplicatedStorage")
     local UIS = game:GetService("UserInputService")
+    local CAS = game:GetService("ContextActionService")
     local LP = Players.LocalPlayer
     local cfg = Core.config.silent
 
     local state = {
         enabled = true,
-        verbose = false,
-        require_knife = true
+        verbose = true,
+        require_knife = false
     }
 
-    local CANDIDATES = {
-        "ShootGun", "KnifeStab", "KnifeThrow",
-        "ReplicateShot", "GiveRodaShot",
-    }
-
+    local CANDIDATES = { "ShootGun", "KnifeStab", "KnifeThrow", "ReplicateShot", "GiveRodaShot" }
     local remotes = {}
 
     local function is_teammate(player)
@@ -35,15 +31,15 @@ getgenv().KVGD_kill_aura = function(Core)
                 for _, name in ipairs(CANDIDATES) do
                     if obj.Name == name then
                         table.insert(remotes, obj)
-                        if state.verbose then
-                            print("[AURA] candidato: " .. obj:GetFullName())
-                        end
                         break
                     end
                 end
             end
         end
         print("[AURA] " .. #remotes .. " remotes coletados")
+        for _, r in ipairs(remotes) do
+            print("[AURA]   -> " .. r:GetFullName())
+        end
     end
 
     local function get_all_enemies()
@@ -61,17 +57,11 @@ getgenv().KVGD_kill_aura = function(Core)
         return list
     end
 
-    -- verifica se tem faca equipada
     local function has_knife_equipped()
         local char = LP.Character
         if not char then return false end
         for _, tool in ipairs(char:GetChildren()) do
-            if tool:IsA("Tool") then
-                local n = tool.Name:lower()
-                if n:find("knife") or n:find("faca") or n:find("dagger") or n:find("blade") then
-                    return true
-                end
-            end
+            if tool:IsA("Tool") then return true end
         end
         return false
     end
@@ -88,13 +78,22 @@ getgenv().KVGD_kill_aura = function(Core)
 
     local function attack_all()
         if not state.enabled then return end
-        if state.require_knife and not has_knife_equipped() then return end
+        if state.require_knife and not has_knife_equipped() then
+            if state.verbose then print("[AURA] sem faca equipada") end
+            return
+        end
 
         local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-        if not me then return end
+        if not me then
+            if state.verbose then print("[AURA] sem HumanoidRootPart") end
+            return
+        end
 
         local targets = get_all_enemies()
-        if #targets == 0 then return end
+        if #targets == 0 then
+            if state.verbose then print("[AURA] nenhum inimigo vivo") end
+            return
+        end
 
         for _, t in ipairs(targets) do
             local vec_unit = (t.hrp.Position - me.Position).Unit
@@ -115,34 +114,30 @@ getgenv().KVGD_kill_aura = function(Core)
         end
     end
 
-    -- dispara no clique esquerdo
-    UIS.InputBegan:Connect(function(input, gpe)
-        if gpe then return end
+    -- ContextActionService: captura ANTES do jogo consumir
+    CAS:BindAction("KVGD_AuraClick", function(_, state_)
+        if state_ == Enum.UserInputState.Begin then
+            attack_all()
+        end
+        return Enum.ContextActionResult.Pass
+    end, false, Enum.UserInputType.MouseButton1, Enum.KeyCode.ButtonR2)
 
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.KeyCode == Enum.KeyCode.ButtonR2 then
+    -- fallback: InputBegan SEM o filtro de gpe pra mouse
+    UIS.InputBegan:Connect(function(input, gpe)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
             attack_all()
         end
 
-        if input.KeyCode == Enum.KeyCode.K then
+        if input.KeyCode == Enum.KeyCode.K and not gpe then
             state.enabled = not state.enabled
             print("[AURA] " .. tostring(state.enabled))
         end
     end)
 
-    -- mobile: também captura toques
-    UIS.TouchStarted:Connect(function()
-        attack_all()
-    end)
+    UIS.TouchStarted:Connect(function() attack_all() end)
 
-    getgenv().AuraToggle = function(v)
-        state.enabled = v
-        print("[AURA] " .. tostring(v))
-    end
-    getgenv().AuraRequireKnife = function(v)
-        state.require_knife = v
-        print("[AURA] require_knife = " .. tostring(v))
-    end
+    getgenv().AuraToggle = function(v) state.enabled = v; print("[AURA] " .. tostring(v)) end
+    getgenv().AuraRequireKnife = function(v) state.require_knife = v end
     getgenv().AuraVerbose = function(v) state.verbose = v end
 
     collect_remotes()
