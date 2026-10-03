@@ -1,5 +1,5 @@
 -- language: Lua, file: kill_aura.lua
--- kill aura: espama KnifeStab + ShootGun em todo inimigo num raio.
+-- spam FireServer em TODOS os inimigos do servidor, sem filtro de raio.
 -- K toggle.
 
 getgenv().KVGD_kill_aura = function(Core)
@@ -11,10 +11,10 @@ getgenv().KVGD_kill_aura = function(Core)
 
     local state = {
         enabled = false,
-        range = 30,
         delay = 0.05,
         use_knife = true,
-        use_gun = true
+        use_gun = true,
+        only_current_weapon = true
     }
 
     local function is_teammate(player)
@@ -32,47 +32,58 @@ getgenv().KVGD_kill_aura = function(Core)
         return nil
     end
 
-    local function get_enemies_in_range(range)
+    -- pega todos os inimigos vivos, sem filtro de distância
+    local function get_all_enemies()
         local list = {}
-        local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-        if not me then return list end
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LP and not is_teammate(p) then
                 local char = p.Character
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
                 if hum and hrp and hum.Health > 0 then
-                    local d = (hrp.Position - me.Position).Magnitude
-                    if d <= range then
-                        table.insert(list, p)
-                    end
+                    table.insert(list, hrp)
                 end
             end
         end
         return list
     end
 
+    -- arma equipada no momento
+    local function current_weapon()
+        local char = LP.Character
+        if not char then return nil end
+        for _, tool in ipairs(char:GetChildren()) do
+            if tool:IsA("Tool") then
+                return tool.Name
+            end
+        end
+        return nil
+    end
+
     task.spawn(function()
         while true do
             task.wait(state.delay)
-            if state.enabled then
-                local targets = get_enemies_in_range(state.range)
+            if state.enabled and LP.Character then
+                local targets = get_all_enemies()
                 if #targets > 0 then
-                    local kn = state.use_knife and find_remote("KnifeStab") or nil
-                    local gun = state.use_gun and find_remote("ShootGun") or nil
-                    local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                    local me = LP.Character:FindFirstChild("HumanoidRootPart")
                     if me then
-                        for _, p in ipairs(targets) do
-                            local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-                            if hrp then
-                                local vec = (hrp.Position - me.Position).Unit
-                                pcall(function()
-                                    if kn then kn:FireServer(vec) end
-                                end)
-                                pcall(function()
-                                    if gun then gun:FireServer(vec) end
-                                end)
-                            end
+                        local weapon = current_weapon()
+                        local kn = find_remote("KnifeStab")
+                        local gun = find_remote("ShootGun")
+
+                        for _, hrp in ipairs(targets) do
+                            local vec = (hrp.Position - me.Position).Unit
+                            pcall(function()
+                                if kn and (not state.only_current_weapon or (weapon and weapon:lower():find("knife"))) then
+                                    kn:FireServer(vec)
+                                end
+                            end)
+                            pcall(function()
+                                if gun and (not state.only_current_weapon or (weapon and not weapon:lower():find("knife"))) then
+                                    gun:FireServer(vec)
+                                end
+                            end)
                         end
                     end
                 end
@@ -89,12 +100,12 @@ getgenv().KVGD_kill_aura = function(Core)
     end)
 
     getgenv().AuraToggle = function(v) state.enabled = v; print("[AURA] " .. tostring(v)) end
-    getgenv().AuraRange = function(v) state.range = v; print("[AURA] range = " .. v) end
     getgenv().AuraDelay = function(v) state.delay = v; print("[AURA] delay = " .. v) end
+    getgenv().AuraOnlyCurrent = function(v) state.only_current_weapon = v; print("[AURA] only_current = " .. tostring(v)) end
     getgenv().AuraKnife = function(v) state.use_knife = v end
     getgenv().AuraGun = function(v) state.use_gun = v end
 
-    print("[AURA] carregado — K toggle | AuraRange(n) | AuraDelay(s)")
+    print("[AURA] carregado — K toggle | AuraDelay(s)")
 end
 
 print("[AURA] módulo definido")
