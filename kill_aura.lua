@@ -1,6 +1,6 @@
 -- language: Lua, file: kill_aura.lua
--- tenta TODOS os remotes de arma com TODOS os formatos de args.
--- K toggle.
+-- dispara em TODOS os inimigos quando você clica com faca equipada.
+-- sem loop contínuo. K toggle ON/OFF.
 
 getgenv().KVGD_kill_aura = function(Core)
     local Players = game:GetService("Players")
@@ -10,25 +10,23 @@ getgenv().KVGD_kill_aura = function(Core)
     local cfg = Core.config.silent
 
     local state = {
-        enabled = false,
-        delay = 0.1,
-        verbose = true
+        enabled = true,
+        verbose = false,
+        require_knife = true
     }
 
-    -- todos os remotes candidatos
     local CANDIDATES = {
         "ShootGun", "KnifeStab", "KnifeThrow",
         "ReplicateShot", "GiveRodaShot",
-        "HitRemote", "DamageRemote", "Attack", "Hit"
     }
+
+    local remotes = {}
 
     local function is_teammate(player)
         if not cfg.team_check or player == LP then return true end
         local a, b = LP.Team, player.Team
         return a and b and a == b
     end
-
-    local remotes = {}
 
     local function collect_remotes()
         remotes = {}
@@ -63,75 +61,92 @@ getgenv().KVGD_kill_aura = function(Core)
         return list
     end
 
-    -- dispara um remote com um formato específico de args
+    -- verifica se tem faca equipada
+    local function has_knife_equipped()
+        local char = LP.Character
+        if not char then return false end
+        for _, tool in ipairs(char:GetChildren()) do
+            if tool:IsA("Tool") then
+                local n = tool.Name:lower()
+                if n:find("knife") or n:find("faca") or n:find("dagger") or n:find("blade") then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
     local function fire(remote, args)
-        local ok, err = pcall(function()
+        pcall(function()
             if remote:IsA("RemoteEvent") then
                 remote:FireServer(table.unpack(args))
             else
                 remote:InvokeServer(table.unpack(args))
             end
         end)
-        return ok
     end
 
-    task.spawn(function()
-        while true do
-            task.wait(state.delay)
-            if state.enabled and LP.Character then
-                local me = LP.Character:FindFirstChild("HumanoidRootPart")
-                if me then
-                    local targets = get_all_enemies()
-                    for _, t in ipairs(targets) do
-                        -- calcula formatos diferentes de argumento
-                        local vec_unit = (t.hrp.Position - me.Position).Unit
-                        local vec_pos  = t.hrp.Position
-                        local cf       = CFrame.new(me.Position, t.hrp.Position)
-                        local name     = t.player.Name
-                        local char     = t.char
-                        local hrp      = t.hrp
+    local function attack_all()
+        if not state.enabled then return end
+        if state.require_knife and not has_knife_equipped() then return end
 
-                        for _, remote in ipairs(remotes) do
-                            -- tenta cada formato
-                            fire(remote, { vec_unit })
-                            fire(remote, { vec_pos })
-                            fire(remote, { cf })
-                            fire(remote, { hrp })
-                            fire(remote, { char })
-                            fire(remote, { name })
-                            fire(remote, { me.Position, vec_unit })
-                            fire(remote, { t.player })
-                            fire(remote, { hrp.Position, hrp })
-                            fire(remote, {})
-                        end
-                    end
-                end
+        local me = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if not me then return end
+
+        local targets = get_all_enemies()
+        if #targets == 0 then return end
+
+        for _, t in ipairs(targets) do
+            local vec_unit = (t.hrp.Position - me.Position).Unit
+            local vec_pos  = t.hrp.Position
+            local cf       = CFrame.new(me.Position, t.hrp.Position)
+
+            for _, remote in ipairs(remotes) do
+                fire(remote, { vec_unit })
+                fire(remote, { vec_pos })
+                fire(remote, { cf })
+                fire(remote, { t.hrp })
+                fire(remote, { t.char })
             end
         end
-    end)
 
+        if state.verbose then
+            print("[AURA] atacou " .. #targets .. " inimigo(s)")
+        end
+    end
+
+    -- dispara no clique esquerdo
     UIS.InputBegan:Connect(function(input, gpe)
         if gpe then return end
+
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.KeyCode == Enum.KeyCode.ButtonR2 then
+            attack_all()
+        end
+
         if input.KeyCode == Enum.KeyCode.K then
             state.enabled = not state.enabled
-            if state.enabled and #remotes == 0 then
-                collect_remotes()
-            end
             print("[AURA] " .. tostring(state.enabled))
         end
     end)
 
+    -- mobile: também captura toques
+    UIS.TouchStarted:Connect(function()
+        attack_all()
+    end)
+
     getgenv().AuraToggle = function(v)
         state.enabled = v
-        if v and #remotes == 0 then collect_remotes() end
         print("[AURA] " .. tostring(v))
     end
-    getgenv().AuraDelay = function(v) state.delay = v end
+    getgenv().AuraRequireKnife = function(v)
+        state.require_knife = v
+        print("[AURA] require_knife = " .. tostring(v))
+    end
     getgenv().AuraVerbose = function(v) state.verbose = v end
-    getgenv().AuraRemotes = function() return remotes end
 
     collect_remotes()
-    print("[AURA] carregado — K toggle")
+    print("[AURA] carregado — clica com a faca equipada | K toggle")
 end
 
 print("[AURA] módulo definido")
